@@ -367,6 +367,8 @@
                 .append('<p class="centerImage"><img src="src/css/images/projectExportDivider.png"/></p>')
                 .append('<a id="exportProj">export</a>')
                 .append('<p class="centerImage"><img src="src/css/images/projectExportDivider.png"/></p>')
+                .append('<a href="http://uhomestore.sinaapp.com" target="_blank">Store</a>')
+                .append('<p class="centerImage"><img src="src/css/images/projectExportDivider.png"/></p>')
                 .append('<a id="about">About</a>')
                 .appendTo(this.ui.extras);
             $(window).trigger('resize');

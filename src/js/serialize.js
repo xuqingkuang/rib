@@ -508,7 +508,7 @@ $(function () {
     function createExportDialog() {
         var dialogOpts, exportTypes, exportDialog, cookieExpires,
             exportMenu, cancelDiv, configNotice, checkbox;
-        exportTypes = ['zip', 'json', 'wgt'];
+        exportTypes = ['zip', 'json', 'wgt', 'uhomestore'];
         cookieExpires = new Date("January 1, 2042");
         dialogOpts = {
             autoOpen: true,
@@ -565,6 +565,62 @@ $(function () {
         return exportDialog;
     }
 
+    function createExportToUHomeStoreDialog(pid, ribFile) {
+        var projName, exportToUHomeStoreDialog, dialogOpts;
+        
+        // Get project name
+        projName = $.rib.pmUtils.getProperty(pid, "name") || "Untitled";
+        
+        // Initial the export to UHome Store dialog.
+        exportToUHomeStoreDialog = $('<div id="exportToUHomeStoreDialog" />')
+            .addClass('ribDialog');
+        $('<div/>').addClass('hbox')
+            .append('<div/>')
+            .children(':first')
+            .addClass('flex1 vbox wrap_left')
+            .append('<form action="/barui/submit/" method="POST" enctype="multipart/form-data">' +
+                '<legend/>' +
+                    '<ul>' +
+                        '<li><input type="hidden" name="type" value="True" /></li>' +
+                        '<li><label for="projectName">Project Name</label>' +
+                            '<input id="projectName" type ="text" name="name" value=""/></li>' +
+                        '<li><label for="packageName">Package Name</label>' +
+                            '<input id="packageName" type ="text" name="package_name" value=""/></li>' +
+                        '<li><label for="projectDesc">Description</label>' +
+                            '<input id="projectDesc" type ="text" name="desc" value=""/></li>' +
+                        '<li><label for="projectVersion">Version</label>' +
+                            '<input id="projectVersion" type ="text" name="version" value=""/></li>' +
+                        '<li><label for="uploadIconXhdpi">Icon XHDPI</label>' +
+                            '<input id="uploadIconXhdpi" type ="file" name="icon_xhdpi" value=""/></li>' +
+                        '<li><input type="submit" /></li>' +
+                    '</ul>' +
+                '</form><div class="div-bottom"></div>')
+            .appendTo(exportToUHomeStoreDialog, this)
+            .submit(function(e) {
+                e.preventDefault();
+                var $self, params;
+                $self = $(this);
+                params = {'form' : $self};
+                createZipAndExport(pid, ribFile, 'uhomestore', params);
+            });
+
+        dialogOpts = {
+            autoOpen: true,
+            modal: true,
+            width: 500,
+            resizable: true,
+            height: 300,
+            title: "Export to UHome Store"
+        };
+        
+        // Initial project settings
+        exportToUHomeStoreDialog.find('#projectName').val(projName);
+        
+        // Generate the dialog
+        exportToUHomeStoreDialog.dialog(dialogOpts);
+        return exportToUHomeStoreDialog
+    }
+
     function exportFile(fileName, content, binary) {
         $.rib.fsUtils.write('exportFile', content, function (fileEntry){
             var a = document.createElement('a');
@@ -578,6 +634,65 @@ $(function () {
                 });
             }
         }, null, false, binary);
+    }
+    
+    function exportToServer(fileName, content, binary, params) {
+        var ab, ia, fd, form, $inputs, $input, contentBlob, errorJSON, errorStr;
+        
+        // Check form parameters
+        form = params['form'];
+        if (!form) {
+            throw "Form needed";
+        }
+        
+        
+        // Process binrary content
+        // Stolen from fs.js
+        if (binary) {
+            // write the bytes of the string to an ArrayBuffer
+            ab = new ArrayBuffer(content.length);
+            ia = new Uint8Array(ab);
+            for (var i = 0; i < content.length; i++) {
+                ia[i] = content.charCodeAt(i);
+            }
+            content = ia;
+        }
+        
+        // Generate the FormData
+        fd = new FormData();
+        $inputs = form.find('input[type="text"], input[type="hidden"]');
+        for (var i=0; i<$inputs.length; i++) {
+            $input = $($inputs[i]);
+            fd.append($input.attr('name'), $input.val());
+        }
+        
+        fd.append('icon_xhdpi', form.find('#uploadIconXhdpi')[0].files[0]);
+        contentBlob = new Blob([content], { type: "application/zip"});
+        fd.append('package_file', contentBlob, fileName); // FIXME
+
+        // Post to server
+        $.ajax({
+            url: params.url,
+            data: fd,
+            processData: false,
+            contentType: false,
+            type: 'POST',
+            success: function(data){
+                alert('Submit succeed, please go to ' + 
+                    '<a href="/barui/">store</a> to download.'
+                );
+            },
+            error: function(request, error) {
+                errorStr = 'Submit error - ';
+                if (arguments[0].status == 400) {
+                    errorJSON = $.parseJSON(arguments[0].responseText);
+                    for (var key in errorJSON) {
+                        errorStr += key + ' (' + errorJSON[key][0] + ') ';
+                    };
+                }
+                alert(errorStr);
+            }
+        });
     }
 
     function getConfigFile(pid, iconPath) {
@@ -644,7 +759,7 @@ $(function () {
         return files;
     }
 
-    function createZipAndExport(pid, ribFile, type) {
+    function createZipAndExport(pid, ribFile, type, params) {
         var zip, projName, resultHTML, resultConfig, files, i, iconPath;
         zip = new JSZip();
         files = getNeededFiles();
@@ -700,7 +815,15 @@ $(function () {
                 zip.add(dstPath, btoa(charArray.join('')), {base64:true});
                 if (i === files.length - 1){
                     var content = zip.generate(true);
-                    exportFile(projName, content, true);
+                    switch (type) {
+                        case "uhomestore":
+                            params['url'] = '/barui/submit/';
+                            exportToServer(projName, content, true, params)
+                            break;
+                        default:
+                            exportFile(projName, content, true);
+                            break;
+                    }
                 }
                 i++;
             }
@@ -715,10 +838,13 @@ $(function () {
     }
 
     function exportPackage(ribFile) {
-        var exportDialog, pid;
+        var exportDialog, exportToUHomeStoreDialog, pid;
         pid = pid || $.rib.pmUtils.getActive();
 
         exportDialog = createExportDialog();
+        exportToUHomeStoreDialog = createExportToUHomeStoreDialog(pid, ribFile);
+        exportToUHomeStoreDialog.dialog('close');
+
         exportDialog.find("button#export-json").click(function () {
             // Get the project Name
             var projName = $.rib.pmUtils.getProperty(pid, "name") || "Untitled";
@@ -733,6 +859,9 @@ $(function () {
         exportDialog.find("button#export-zip").click(function () {
             createZipAndExport(pid, ribFile, 'zip');
             exportDialog.dialog('close');
+        });
+        exportDialog.find("button#export-uhomestore").click(function () {
+            exportToUHomeStoreDialog.dialog('open');
         });
         return;
     }
